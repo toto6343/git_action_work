@@ -1,4 +1,4 @@
-name : Github Actions 실행시켜보기
+name: Deploy Spring Project to EC2
 
 on:
   push:
@@ -6,19 +6,51 @@ on:
       - main
 
 jobs:
-  My-Deploy-Job:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Hello World 찍기
-        run: echo "Hello World"
+      # 1️⃣ GitHub 리포지토리 코드 가져오기
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
-      - name : 여러 명령어 문자 작성하기
-        run : |
-          echo "Good"
-          echo "morning"
+      # 2️⃣ JDK 설치 (Spring Boot 빌드용)
+      - name: Set up JDK
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: "17"
 
-      - name : GitAction Secret 변수 사용하기
-        run: |
-          echo ${{secrets.MY_NAME}}
-          echo ${{secrets.MY_AGE}}
+      # 3️⃣ Maven 빌드
+      - name: Build Spring Project
+        run: ./mvnw clean package -DskipTests
+
+      # 4️⃣ EC2 서버로 SSH 접속 후 배포
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }} # EC2 Public IP
+          username: ${{ secrets.EC2_USERNAME }} # ec2-user 또는 ubuntu
+          key: ${{ secrets.EC2_PRIVATE_KEY }} # PEM Key 내용
+          script: |
+            # 4-1) 프로젝트 폴더 이동
+            cd /home/ubuntu/git_action_spring
+
+            # 4-2) 최신 코드 pull
+            git pull origin main
+
+            # 4-3) Maven 빌드 권한 설정 및 빌드
+            chmod +x mvnw
+            ./mvnw clean package -DskipTests
+
+            # 4-4) 80번 포트 점유 프로세스 종료
+            sudo fuser -k -n tcp 80 || true
+
+            # 4-5) 이전 실행 Java 프로세스 종료
+            pkill -f 'java -jar' || true
+
+            # 4-6) 새 빌드 실행 (백그라운드)
+            sudo nohup java -jar target/*.jar > app.log 2>&1 &
+
+            # 4-7) 배포 완료 로그
+            echo "Deployment completed!"
